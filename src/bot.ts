@@ -107,6 +107,7 @@ export class Bot {
       })),
     });
 
+    console.log(`Decision: ${decision.action}${decision.question_id !== null ? ` (answers question ${decision.question_id})` : ""}`);
     const question = pending.find((p) => p.botTs === decision.question_id);
     const target = decision.event_id !== null ? store.getEvent(decision.event_id) : linkedEvent;
 

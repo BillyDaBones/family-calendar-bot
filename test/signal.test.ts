@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { groupIds } from "../src/config";
-import { parseEnvelope } from "../src/signal";
+import { parseEnvelope, sentTimestamp } from "../src/signal";
 
 const GROUP = "abc123internal==";
 const opts = { groupInternalId: GROUP, ownNumber: "+1000", nameFor: (n: string) => (n === "+1222" ? "Johnny" : undefined) };
@@ -61,5 +61,17 @@ describe("groupIds", () => {
     const { send, internal } = groupIds(GROUP);
     expect(groupIds(send)).toEqual({ send, internal });
     expect(internal).toBe(GROUP);
+  });
+});
+
+describe("sentTimestamp", () => {
+  test("reads the timestamp from an object or a one-item array", () => {
+    expect(sentTimestamp({ timestamp: "1793047035622" })).toBe(1793047035622);
+    expect(sentTimestamp([{ timestamp: "1793047035622" }])).toBe(1793047035622);
+  });
+
+  test("throws when there is no usable timestamp", () => {
+    expect(() => sentTimestamp({})).toThrow();
+    expect(() => sentTimestamp([])).toThrow();
   });
 });

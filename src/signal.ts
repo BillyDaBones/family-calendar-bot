@@ -88,6 +88,14 @@ export function parseEnvelope(
   return msg;
 }
 
+// /v2/send answers with { timestamp } or, on some versions, [{ timestamp }].
+export function sentTimestamp(json: unknown): number {
+  const item = (Array.isArray(json) ? json[0] : json) as { timestamp?: string | number } | undefined;
+  const ts = Number(item?.timestamp);
+  if (!Number.isSafeInteger(ts) || ts <= 0) throw new Error(`Signal send returned no timestamp: ${JSON.stringify(json)}`);
+  return ts;
+}
+
 export class SignalClient implements Sender {
   constructor(
     private apiUrl: string,
@@ -112,8 +120,7 @@ export class SignalClient implements Sender {
       body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`Signal send failed: ${res.status} ${await res.text()}`);
-    const json = (await res.json()) as { timestamp?: string | number };
-    return Number(json.timestamp);
+    return sentTimestamp(await res.json());
   }
 
   // Streams envelopes forever, reconnecting with backoff when the socket drops.

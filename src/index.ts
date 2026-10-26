@@ -37,6 +37,7 @@ signal.listen((envelope) => {
     nameFor: (n) => bot.nameFor(n),
   });
   if (!msg) return;
+  console.log(`Group ${msg.kind} from ${msg.authorName}${msg.quote ? " (reply)" : ""}`);
   queue = queue.then(() => bot.handle(msg)).catch((err) => console.error("Unhandled error", err));
 });
 
