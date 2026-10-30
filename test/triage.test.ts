@@ -12,8 +12,8 @@ const clearNo: Judgments = {
 };
 
 describe("triageAction", () => {
-  test("deletes chatter that is clearly unrelated", () => {
-    expect(triageAction(clearNo)).toBe("delete");
+  test("roasts chatter that is clearly unrelated", () => {
+    expect(triageAction(clearNo)).toBe("roast");
   });
 
   test("keeps anything that might create or change an event", () => {

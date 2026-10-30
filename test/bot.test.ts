@@ -22,6 +22,11 @@ class FakeBrain implements Brain {
     this.inputs.push(input);
     return { ...NONE, ...this.next };
   }
+  roasted: string[] = [];
+  async roast(message: { authorName: string; text: string }) {
+    this.roasted.push(message.text);
+    return `Wow, "${message.text}". Riveting.`;
+  }
 }
 
 class FakeCalendar implements CalendarApi {
@@ -51,12 +56,8 @@ class FakeSignal implements Sender {
     return ts;
   }
   direct: { number: string; text: string }[] = [];
-  deleted: number[] = [];
   async sendDirect(number: string, text: string) {
     this.direct.push({ number, text });
-  }
-  async remoteDelete(ts: number) {
-    this.deleted.push(ts);
   }
   get last() {
     return this.sent.at(-1)!;
@@ -223,17 +224,24 @@ describe("Bot", () => {
       bot = new Bot({ store, brain, calendar, signal, members, ownNumber: BILLY, timezone: "America/New_York", triage, clock: () => new Date("2026-10-26T16:00:00Z") });
     });
 
-    test("deletes the bot account's own off-topic messages", async () => {
-      const m = msg("lol", { author: BILLY, authorName: "Billy" });
-      await bot.handle(m);
-      expect(signal.deleted).toEqual([m.ts]);
+    test("DMs a roast of the message to whoever posted it", async () => {
+      await bot.handle(msg("lol"));
+      expect(brain.roasted).toEqual(["lol"]);
+      expect(signal.direct).toEqual([{ number: JOHNNY, text: '📅 Wow, "lol". Riveting.' }]);
+      expect(signal.sent).toEqual([]);
     });
 
-    test("nudges other members by DM, since Signal can't delete their messages", async () => {
+    test("roasts the bot account's own messages too", async () => {
+      await bot.handle(msg("lol", { author: BILLY, authorName: "Billy" }));
+      expect(signal.direct.map((d) => d.number)).toEqual([BILLY]);
+    });
+
+    test("falls back to a stock nudge when the roast fails", async () => {
+      brain.roast = async () => {
+        throw new Error("down");
+      };
       await bot.handle(msg("lol"));
-      expect(signal.deleted).toEqual([]);
-      expect(signal.direct).toEqual([{ number: JOHNNY, text: expect.stringMatching(/^📅 /) }]);
-      expect(signal.sent).toEqual([]);
+      expect(signal.direct[0]!.text).toMatch(/^📅 /);
     });
 
     test("DMs help to someone asking how to use the calendar", async () => {
@@ -241,7 +249,6 @@ describe("Bot", () => {
       await bot.handle(msg("how do I add something?"));
       expect(signal.direct).toEqual([{ number: JOHNNY, text: expect.stringContaining("family calendar bot") }]);
       expect(signal.sent).toEqual([]);
-      expect(signal.deleted).toEqual([]);
     });
 
     test("DMs upcoming events to someone asking about them", async () => {
@@ -260,7 +267,6 @@ describe("Bot", () => {
     test("leaves the message when Jev fails", async () => {
       bot = new Bot({ store, brain, calendar, signal, members, ownNumber: BILLY, timezone: "America/New_York", triage: { judge: async () => { throw new Error("down"); } } });
       await bot.handle(msg("lol", { author: BILLY }));
-      expect(signal.deleted).toEqual([]);
       expect(signal.sent).toEqual([]);
     });
   });

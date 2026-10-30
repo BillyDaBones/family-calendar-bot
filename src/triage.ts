@@ -33,7 +33,7 @@ export interface Triage {
   judge(input: TriageInput): Promise<Judgments>;
 }
 
-export type TriageAction = "keep" | "delete" | "dm_help" | "dm_events";
+export type TriageAction = "keep" | "roast" | "dm_help" | "dm_events";
 
 const YES = 0.7;
 const NO = 0.3;
@@ -45,7 +45,7 @@ export function triageAction(j: Judgments): TriageAction {
   if (j.asksHowToUseBot >= YES) return "dm_help";
   if (j.asksAboutEvents >= YES) return "dm_events";
   if (j.asksHowToUseBot >= NO || j.asksAboutEvents >= NO) return "keep";
-  return "delete";
+  return "roast";
 }
 
 export function buildState(input: TriageInput) {

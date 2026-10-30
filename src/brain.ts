@@ -31,6 +31,8 @@ export interface BrainInput {
 
 export interface Brain {
   decide(input: BrainInput): Promise<Decision>;
+  // A short, playful DM teasing someone for posting off-topic in the events group.
+  roast(message: { authorName: string; text: string }): Promise<string>;
 }
 
 const SYSTEM = `You keep a family's shared Google Calendar in sync with their Signal "events" group. For each new group message, choose exactly one action and return it as JSON.
@@ -52,6 +54,14 @@ Rules:
 - If the message answers a pending question, set question_id to that question's id and act on the original message plus the answer.
 - When unsure whether a message is about the calendar at all, choose none.
 - Unused fields are null.`;
+
+const ROAST = `Someone posted a message in their family's Signal "events" group, which is only for planning get-togethers. Write the direct message the calendar bot sends them.
+
+- Tease them about this specific message, dryly and sarcastically. Under 30 words in total.
+- Work in that the events group is for plans and the family chat is for everything else, in your own words.
+- Skip stock openers such as "bold of you" or "I see you've".
+- Keep it affectionate: this is family, including grandparents. No insults about looks, age, weight or intelligence, and no swearing.
+- Reply with the message text only.`;
 
 function describeEvent(e: StoredEvent): string {
   const parts = [`#${e.id} "${e.title}" ${formatWhen(e.start, e.allDay)} (start ${e.start})`];
@@ -102,6 +112,19 @@ export class ClaudeBrain implements Brain {
       return { ...NONE };
     }
     return response.parsed_output;
+  }
+
+  async roast(message: { authorName: string; text: string }): Promise<string> {
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: 1000,
+      system: ROAST,
+      output_config: { effort: "low" },
+      messages: [{ role: "user", content: `${message.authorName} wrote: ${JSON.stringify(message.text)}` }],
+    });
+    const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("").trim();
+    if (!text) throw new Error(`Empty roast (stop_reason=${response.stop_reason})`);
+    return text;
   }
 }
 
