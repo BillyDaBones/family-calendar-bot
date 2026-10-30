@@ -20,6 +20,13 @@ const HELP = `${PREFIX} I'm the family calendar bot. I keep the "Harris Family" 
 
 Messages from me always start with ${PREFIX}. If I get something wrong, reply to my message to fix it, or edit the event in Google Calendar.`;
 
+const NUDGES = [
+  `${PREFIX} Fascinating. Truly. But the events group is for events. The family chat misses you.`,
+  `${PREFIX} I checked, and that message has no date, no time and no plan. Bold choice for the events group.`,
+  `${PREFIX} Love that for you. Now take it to the family chat, where it belongs.`,
+  `${PREFIX} Quick reminder: the events group is for plans. I'm a calendar, not a group chat.`,
+];
+
 export interface BotDeps {
   store: Store;
   brain: Brain;
@@ -242,8 +249,8 @@ export class Bot {
     if (action === "dm_help") return signal.sendDirect(msg.author, HELP);
     if (action === "dm_events") return signal.sendDirect(msg.author, `${this.eventsText()}\n\nSend !help to see what I can do.`);
     if (action === "delete") {
-      // Signal only lets an account delete its own messages.
-      if (msg.author !== ownNumber) return void console.log("Off-topic message from another member; Signal can't delete it");
+      // Signal only lets an account delete its own messages, so everyone else gets a nudge.
+      if (msg.author !== ownNumber) return signal.sendDirect(msg.author, NUDGES[msg.ts % NUDGES.length]!);
       await signal.remoteDelete(msg.ts);
     }
   }

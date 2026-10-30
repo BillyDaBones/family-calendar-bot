@@ -229,9 +229,11 @@ describe("Bot", () => {
       expect(signal.deleted).toEqual([m.ts]);
     });
 
-    test("can't delete other members' messages", async () => {
+    test("nudges other members by DM, since Signal can't delete their messages", async () => {
       await bot.handle(msg("lol"));
       expect(signal.deleted).toEqual([]);
+      expect(signal.direct).toEqual([{ number: JOHNNY, text: expect.stringMatching(/^📅 /) }]);
+      expect(signal.sent).toEqual([]);
     });
 
     test("DMs help to someone asking how to use the calendar", async () => {
