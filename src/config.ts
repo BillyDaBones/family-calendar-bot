@@ -11,6 +11,9 @@ export type Member = z.infer<typeof Member>;
 
 export interface Config {
   anthropicModel: string;
+  // Jev triage of off-topic messages runs only when TYPESAFE_API_KEY is set.
+  typesafeApiKey: string | undefined;
+  typesafeModel: string;
   googleClientId: string;
   googleClientSecret: string;
   googleRefreshToken: string;
@@ -48,6 +51,8 @@ export function loadConfig(): Config {
   const ids = groupIds(required("SIGNAL_GROUP_ID"));
   return {
     anthropicModel: process.env.CLAUDE_MODEL || "claude-opus-5-5",
+    typesafeApiKey: process.env.TYPESAFE_API_KEY || undefined,
+    typesafeModel: process.env.TYPESAFE_MODEL || "jev-latest",
     googleClientId: required("GOOGLE_CLIENT_ID"),
     googleClientSecret: required("GOOGLE_CLIENT_SECRET"),
     googleRefreshToken: required("GOOGLE_REFRESH_TOKEN"),

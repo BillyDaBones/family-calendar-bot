@@ -6,6 +6,7 @@ import { GoogleCalendar } from "./calendar";
 import { loadConfig } from "./config";
 import { SignalClient, parseEnvelope } from "./signal";
 import { Store } from "./store";
+import { JevTriage } from "./triage";
 
 const config = loadConfig();
 mkdirSync(config.dataDir, { recursive: true });
@@ -25,6 +26,7 @@ const bot = new Bot({
   members: config.members,
   ownNumber: config.signalNumber,
   timezone: config.timezone,
+  triage: config.typesafeApiKey ? new JevTriage(config.typesafeApiKey, config.typesafeModel) : undefined,
 });
 
 // Handle messages one at a time so replies and edits land in order.

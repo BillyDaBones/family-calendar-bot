@@ -19,6 +19,10 @@ export interface QuoteRef {
 export interface Sender {
   // Posts to the events group and returns the sent message's timestamp.
   send(text: string, quote?: QuoteRef): Promise<number>;
+  // Sends a direct message to one member.
+  sendDirect(number: string, text: string): Promise<void>;
+  // Deletes one of this account's own group messages for everyone.
+  remoteDelete(ts: number): Promise<void>;
 }
 
 type DataMessage = {
@@ -121,6 +125,24 @@ export class SignalClient implements Sender {
     });
     if (!res.ok) throw new Error(`Signal send failed: ${res.status} ${await res.text()}`);
     return sentTimestamp(await res.json());
+  }
+
+  async sendDirect(number: string, text: string): Promise<void> {
+    const res = await fetch(`${this.apiUrl}/v2/send`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ number: this.number, recipients: [number], message: text }),
+    });
+    if (!res.ok) throw new Error(`Signal direct send failed: ${res.status} ${await res.text()}`);
+  }
+
+  async remoteDelete(ts: number): Promise<void> {
+    const res = await fetch(`${this.apiUrl}/v1/remote-delete/${encodeURIComponent(this.number)}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ recipient: this.groupSendId, timestamp: ts }),
+    });
+    if (!res.ok) throw new Error(`Signal remote delete failed: ${res.status} ${await res.text()}`);
   }
 
   // Streams envelopes forever, reconnecting with backoff when the socket drops.

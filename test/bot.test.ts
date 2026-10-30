@@ -5,6 +5,7 @@ import type { CalendarApi, CalendarEvent } from "../src/calendar";
 import type { Member } from "../src/config";
 import type { Incoming, QuoteRef, Sender } from "../src/signal";
 import { Store } from "../src/store";
+import type { Judgments, Triage, TriageInput } from "../src/triage";
 
 const BILLY = "+15550000001";
 const JOHNNY = "+15550000002";
@@ -48,6 +49,14 @@ class FakeSignal implements Sender {
     const ts = ++this.ts;
     this.sent.push({ text, quote, ts });
     return ts;
+  }
+  direct: { number: string; text: string }[] = [];
+  deleted: number[] = [];
+  async sendDirect(number: string, text: string) {
+    this.direct.push({ number, text });
+  }
+  async remoteDelete(ts: number) {
+    this.deleted.push(ts);
   }
   get last() {
     return this.sent.at(-1)!;
@@ -187,5 +196,70 @@ describe("Bot", () => {
     brain.next = { action: "create", title: "Party", start: "2026-11-01", all_day: true };
     await bot.handle(msg("party on the 1st"));
     expect(signal.last.text).toContain("couldn't update the calendar");
+  });
+
+  describe("triage", () => {
+    const clearNo: Judgments = {
+      announcesPlan: 0.02,
+      changesPlan: 0.02,
+      addsDetail: 0.02,
+      cancelsPlan: 0.02,
+      answersBot: null,
+      asksAboutEvents: 0.05,
+      asksHowToUseBot: 0.05,
+    };
+    let judgments: Judgments;
+    let inputs: TriageInput[];
+
+    beforeEach(() => {
+      judgments = clearNo;
+      inputs = [];
+      const triage: Triage = {
+        judge: async (input) => {
+          inputs.push(input);
+          return judgments;
+        },
+      };
+      bot = new Bot({ store, brain, calendar, signal, members, ownNumber: BILLY, timezone: "America/New_York", triage, clock: () => new Date("2026-10-26T16:00:00Z") });
+    });
+
+    test("deletes the bot account's own off-topic messages", async () => {
+      const m = msg("lol", { author: BILLY, authorName: "Billy" });
+      await bot.handle(m);
+      expect(signal.deleted).toEqual([m.ts]);
+    });
+
+    test("can't delete other members' messages", async () => {
+      await bot.handle(msg("lol"));
+      expect(signal.deleted).toEqual([]);
+    });
+
+    test("DMs help to someone asking how to use the calendar", async () => {
+      judgments = { ...clearNo, asksHowToUseBot: 0.95 };
+      await bot.handle(msg("how do I add something?"));
+      expect(signal.direct).toEqual([{ number: JOHNNY, text: expect.stringContaining("family calendar bot") }]);
+      expect(signal.sent).toEqual([]);
+      expect(signal.deleted).toEqual([]);
+    });
+
+    test("DMs upcoming events to someone asking about them", async () => {
+      await createThanksgiving();
+      brain.next = {};
+      judgments = { ...clearNo, asksAboutEvents: 0.95 };
+      await bot.handle(msg("what time is thanksgiving?"));
+      expect(signal.direct.at(-1)!.text).toContain("Thanksgiving at Mom's");
+    });
+
+    test("only runs when Claude chose none", async () => {
+      await createThanksgiving();
+      expect(inputs).toEqual([]);
+    });
+
+    test("leaves the message when Jev fails", async () => {
+      bot = new Bot({ store, brain, calendar, signal, members, ownNumber: BILLY, timezone: "America/New_York", triage: { judge: async () => { throw new Error("down"); } } });
+      await bot.handle(msg("lol", { author: BILLY }));
+      expect(signal.deleted).toEqual([]);
+      expect(signal.sent).toEqual([]);
+    });
   });
 });

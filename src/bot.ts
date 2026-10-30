@@ -3,6 +3,7 @@ import type { CalendarApi, CalendarEvent } from "./calendar";
 import type { Member } from "./config";
 import type { Incoming, Sender } from "./signal";
 import type { StoredEvent, Store } from "./store";
+import { triageAction, type Triage } from "./triage";
 import { addDays, formatDay, formatNow, formatWhen, isValidStart, nowLocal } from "./time";
 
 export const PREFIX = "📅";
@@ -27,6 +28,8 @@ export interface BotDeps {
   members: Member[];
   ownNumber: string;
   timezone: string;
+  // Optional: without it, off-topic messages are left alone.
+  triage?: Triage;
   clock?: () => Date;
 }
 
@@ -70,13 +73,16 @@ export class Bot {
     return this.deps.signal.send(text, { ts: msg.ts, author: msg.author, text: msg.text });
   }
 
-  private async listEvents(msg: Incoming): Promise<void> {
+  private eventsText(): string {
     const today = this.now().slice(0, 10);
     const events = this.deps.store.eventsBetween(today, addDays(today, 60));
-    const text = events.length
+    return events.length
       ? [`${PREFIX} Next 60 days:`, ...events.map((e) => `• ${formatWhen(e.start, e.allDay)} — ${e.title}`)].join("\n")
       : `${PREFIX} Nothing on the calendar for the next 60 days.`;
-    await this.reply(msg, text);
+  }
+
+  private async listEvents(msg: Incoming): Promise<void> {
+    await this.reply(msg, this.eventsText());
   }
 
   private async process(msg: Incoming): Promise<void> {
@@ -91,13 +97,14 @@ export class Bot {
           ? store.linkedEvent(msg.quote.ts, msg.quote.author)
           : null;
     const pending = store.openPending(Date.now() - PENDING_TTL_MS);
+    const upcoming = store.eventsBetween(today, addDays(today, 365));
 
     const decision = await this.deps.brain.decide({
       now: `${formatNow(now)} (${this.deps.timezone})`,
       message: { authorName: msg.authorName, text: msg.text, isEdit: msg.kind === "edit" },
       linkedEvent,
       quotedText: msg.quote?.text ?? null,
-      upcoming: store.eventsBetween(today, addDays(today, 365)),
+      upcoming,
       recent: this.recent,
       pending: pending.map((p) => ({
         id: p.botTs,
@@ -113,7 +120,7 @@ export class Bot {
 
     switch (decision.action) {
       case "none":
-        return;
+        return this.triageOffTopic(msg, upcoming, pending.map((p) => p.question));
       case "create":
         return this.create(msg, decision, question?.botTs ?? null);
       case "ask":
@@ -213,6 +220,32 @@ export class Bot {
     const lines = [`${PREFIX} Cancelled: ${event.title} (${formatWhen(event.start, event.allDay)})`];
     if (this.invitees().length) lines.push("Invitees were notified.");
     await this.reply(msg, lines.join("\n"));
+  }
+
+  // A message Claude didn't act on: Jev judges whether it's about events, and the bot either
+  // leaves it, DMs the author an answer, or deletes it from the group.
+  private async triageOffTopic(msg: Incoming, upcoming: StoredEvent[], pendingQuestions: string[]): Promise<void> {
+    const { triage, signal, ownNumber } = this.deps;
+    if (!triage || msg.kind === "edit") return;
+
+    let action;
+    try {
+      const judgments = await triage.judge({ message: { authorName: msg.authorName, text: msg.text }, recent: this.recent, upcoming, pendingQuestions });
+      action = triageAction(judgments);
+      console.log(`Triage: ${action}`, judgments);
+    } catch (err) {
+      // A failed call is not an answer: leave the message alone.
+      console.error("Triage failed; leaving message", err);
+      return;
+    }
+
+    if (action === "dm_help") return signal.sendDirect(msg.author, HELP);
+    if (action === "dm_events") return signal.sendDirect(msg.author, `${this.eventsText()}\n\nSend !help to see what I can do.`);
+    if (action === "delete") {
+      // Signal only lets an account delete its own messages.
+      if (msg.author !== ownNumber) return void console.log("Off-topic message from another member; Signal can't delete it");
+      await signal.remoteDelete(msg.ts);
+    }
   }
 
   private async ask(msg: Incoming, d: Decision): Promise<void> {
