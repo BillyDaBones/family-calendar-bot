@@ -3,7 +3,7 @@ import type { CalendarApi, CalendarEvent } from "./calendar";
 import type { Member } from "./config";
 import type { Incoming, Sender } from "./signal";
 import type { StoredEvent, Store } from "./store";
-import { triageAction, type Triage } from "./triage";
+import { triageAction, type Triage, type TriageInput } from "./triage";
 import { addDays, formatDay, formatNow, formatWhen, isValidStart, nowLocal } from "./time";
 
 export const PREFIX = "📅";
@@ -81,16 +81,33 @@ export class Bot {
     return this.deps.signal.send(text, { ts: msg.ts, author: msg.author, text: msg.text });
   }
 
-  private eventsText(): string {
+  private async eventsText(): Promise<string> {
     const today = this.now().slice(0, 10);
-    const events = this.deps.store.eventsBetween(today, addDays(today, 60));
+    const to = addDays(today, 60);
+    const events = await this.deps.calendar.list(today, to).catch((err) => {
+      // Fall back to the events the bot made itself.
+      console.error("Listing Google Calendar failed; using local events", err);
+      return this.deps.store.eventsBetween(today, to);
+    });
     return events.length
       ? [`${PREFIX} Next 60 days:`, ...events.map((e) => `• ${formatWhen(e.start, e.allDay)} — ${e.title}`)].join("\n")
       : `${PREFIX} Nothing on the calendar for the next 60 days.`;
   }
 
   private async listEvents(msg: Incoming): Promise<void> {
-    await this.reply(msg, this.eventsText());
+    await this.reply(msg, await this.eventsText());
+  }
+
+  // Google Calendar events the bot didn't create, so Claude doesn't add duplicates of them.
+  private async otherEvents(today: string, known: StoredEvent[]): Promise<CalendarEvent[]> {
+    const ids = new Set(known.map((e) => e.gcalId));
+    try {
+      const events = await this.deps.calendar.list(today, addDays(today, 365));
+      return events.filter((e) => !ids.has(e.gcalId)).map(({ gcalId, ...event }) => event);
+    } catch (err) {
+      console.error("Listing Google Calendar failed; deciding without other events", err);
+      return [];
+    }
   }
 
   private async process(msg: Incoming): Promise<void> {
@@ -106,6 +123,7 @@ export class Bot {
           : null;
     const pending = store.openPending(Date.now() - PENDING_TTL_MS);
     const upcoming = store.eventsBetween(today, addDays(today, 365));
+    const otherEvents = await this.otherEvents(today, upcoming);
 
     const decision = await this.deps.brain.decide({
       now: `${formatNow(now)} (${this.deps.timezone})`,
@@ -113,6 +131,7 @@ export class Bot {
       linkedEvent,
       quotedText: msg.quote?.text ?? null,
       upcoming,
+      otherEvents,
       recent: this.recent,
       pending: pending.map((p) => ({
         id: p.botTs,
@@ -128,7 +147,7 @@ export class Bot {
 
     switch (decision.action) {
       case "none":
-        return this.triageOffTopic(msg, upcoming, pending.map((p) => p.question));
+        return this.triageOffTopic(msg, [...upcoming, ...otherEvents], pending.map((p) => p.question));
       case "create":
         return this.create(msg, decision, question?.botTs ?? null);
       case "ask":
@@ -232,7 +251,7 @@ export class Bot {
 
   // A message Claude didn't act on: Jev judges whether it's about events, and the bot either
   // leaves it, DMs the author an answer, or DMs them a roast for posting off-topic.
-  private async triageOffTopic(msg: Incoming, upcoming: StoredEvent[], pendingQuestions: string[]): Promise<void> {
+  private async triageOffTopic(msg: Incoming, upcoming: TriageInput["upcoming"], pendingQuestions: string[]): Promise<void> {
     const { triage, signal } = this.deps;
     if (!triage || msg.kind === "edit") return;
 
@@ -248,7 +267,7 @@ export class Bot {
     }
 
     if (action === "dm_help") return signal.sendDirect(msg.author, HELP);
-    if (action === "dm_events") return signal.sendDirect(msg.author, `${this.eventsText()}\n\nSend !help to see what I can do.`);
+    if (action === "dm_events") return signal.sendDirect(msg.author, `${await this.eventsText()}\n\nSend !help to see what I can do.`);
     if (action === "roast") {
       const roast = await this.deps.brain.roast({ authorName: msg.authorName, text: msg.text }).then(
         (text) => `${PREFIX} ${text}`,

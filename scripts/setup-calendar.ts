@@ -34,7 +34,7 @@ async function google(method: string, path: string, body?: unknown) {
 let calendarId = process.env.GOOGLE_CALENDAR_ID;
 if (!calendarId) {
   const created = await google("POST", "/calendars", {
-    summary: "Harris Family",
+    summary: process.env.CALENDAR_NAME || "Harris Family",
     timeZone: process.env.TIMEZONE || "America/New_York",
   });
   calendarId = created.id as string;

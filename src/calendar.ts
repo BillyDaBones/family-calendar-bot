@@ -9,11 +9,17 @@ export interface CalendarEvent {
   description: string;
 }
 
+export interface ListedEvent extends CalendarEvent {
+  gcalId: string;
+}
+
 export interface CalendarApi {
   create(event: CalendarEvent, attendees: string[]): Promise<string>;
   // notify=false saves the change without emailing invitees.
   update(gcalId: string, event: CalendarEvent, notify: boolean): Promise<void>;
   cancel(gcalId: string): Promise<void>;
+  // Every event on the calendar starting on a local date in [fromDate, toDate), including ones added outside the bot.
+  list(fromDate: string, toDate: string): Promise<ListedEvent[]>;
 }
 
 const API = "https://www.googleapis.com/calendar/v3";
@@ -48,9 +54,10 @@ export class GoogleCalendar implements CalendarApi {
     return this.token.value;
   }
 
-  private async request(method: string, path: string, body?: unknown, notify = true): Promise<any> {
+  private async request(method: string, path: string, body?: unknown, notify = true, query: Record<string, string> = {}): Promise<any> {
     // sendUpdates=all emails invitees about creates, changes and cancellations.
-    const url = `${API}/calendars/${encodeURIComponent(this.opts.calendarId)}${path}?sendUpdates=${notify ? "all" : "none"}`;
+    const params = new URLSearchParams({ sendUpdates: notify ? "all" : "none", ...query });
+    const url = `${API}/calendars/${encodeURIComponent(this.opts.calendarId)}${path}?${params}`;
     const res = await fetch(url, {
       method,
       headers: {
@@ -96,5 +103,42 @@ export class GoogleCalendar implements CalendarApi {
 
   async cancel(gcalId: string): Promise<void> {
     await this.request("DELETE", `/events/${encodeURIComponent(gcalId)}`);
+  }
+
+  async list(fromDate: string, toDate: string): Promise<ListedEvent[]> {
+    // Query a day wider on each side so timezone offsets can't drop events, then filter on local dates.
+    const query = {
+      timeMin: `${addDays(fromDate, -1)}T00:00:00Z`,
+      timeMax: `${addDays(toDate, 1)}T00:00:00Z`,
+      timeZone: this.opts.timezone,
+      singleEvents: "true",
+      orderBy: "startTime",
+      maxResults: "250",
+    };
+    const items: any[] = [];
+    let pageToken: string | undefined;
+    do {
+      const json = await this.request("GET", "/events", undefined, false, pageToken ? { ...query, pageToken } : query);
+      items.push(...json.items);
+      pageToken = json.nextPageToken;
+    } while (pageToken);
+
+    return items
+      .filter((item) => item.status !== "cancelled")
+      .map((item) => {
+        const allDay = !item.start.dateTime;
+        return {
+          // Recurring instances carry their series id, which is what the bot stores.
+          gcalId: (item.recurringEventId ?? item.id) as string,
+          title: item.summary ?? "(no title)",
+          // dateTime comes back in the requested timeZone, so its first 16 characters are local wall-clock time.
+          start: allDay ? item.start.date : item.start.dateTime.slice(0, 16),
+          end: allDay ? addDays(item.end.date, -1) : item.end.dateTime.slice(0, 16),
+          allDay,
+          location: item.location ?? null,
+          description: item.description ?? "",
+        };
+      })
+      .filter((e) => e.start.slice(0, 10) >= fromDate && e.start.slice(0, 10) < toDate);
   }
 }

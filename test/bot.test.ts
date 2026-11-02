@@ -45,6 +45,14 @@ class FakeCalendar implements CalendarApi {
   async cancel(id: string) {
     this.events.delete(id);
   }
+  // Events added directly in Google Calendar, not by the bot.
+  external: CalendarEvent[] = [];
+  async list(fromDate: string, toDate: string) {
+    const ours = [...this.events].map(([gcalId, e]) => ({ ...e.event, gcalId }));
+    return [...ours, ...this.external.map((e, i) => ({ ...e, gcalId: `ext${i}` }))]
+      .filter((e) => e.start.slice(0, 10) >= fromDate && e.start.slice(0, 10) < toDate)
+      .sort((a, b) => a.start.localeCompare(b.start));
+  }
 }
 
 class FakeSignal implements Sender {
@@ -183,6 +191,30 @@ describe("Bot", () => {
     await bot.handle(msg("!events"));
     expect(signal.last.text).toBe("📅 Next 60 days:\n• Thu, Nov 26 · 2:00 PM — Thanksgiving at Mom's");
     expect(brain.inputs.length).toBe(1);
+  });
+
+  test("!events includes events added directly in Google Calendar", async () => {
+    await createThanksgiving();
+    calendar.external.push({ title: "Dentist", start: "2026-11-10", end: null, allDay: true, location: null, description: "" });
+    await bot.handle(msg("!events"));
+    expect(signal.last.text).toBe("📅 Next 60 days:\n• Tue, Nov 10 — Dentist\n• Thu, Nov 26 · 2:00 PM — Thanksgiving at Mom's");
+  });
+
+  test("tells Claude about events added outside the bot", async () => {
+    await createThanksgiving();
+    calendar.external.push({ title: "Dentist", start: "2026-11-10", end: null, allDay: true, location: null, description: "" });
+    brain.next = {};
+    await bot.handle(msg("anyone free saturday?"));
+    expect(brain.inputs.at(-1)!.otherEvents.map((e) => e.title)).toEqual(["Dentist"]);
+  });
+
+  test("!events falls back to local events when Google fails", async () => {
+    await createThanksgiving();
+    calendar.list = async () => {
+      throw new Error("down");
+    };
+    await bot.handle(msg("!events"));
+    expect(signal.last.text).toBe("📅 Next 60 days:\n• Thu, Nov 26 · 2:00 PM — Thanksgiving at Mom's");
   });
 
   test("ignores its own messages", async () => {

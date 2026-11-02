@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
+import type { CalendarEvent } from "./calendar";
 import type { StoredEvent } from "./store";
 import { formatWhen } from "./time";
 
@@ -25,6 +26,8 @@ export interface BrainInput {
   linkedEvent: StoredEvent | null;
   quotedText: string | null;
   upcoming: StoredEvent[];
+  // Events added in Google Calendar outside the bot. The bot can't change these.
+  otherEvents: CalendarEvent[];
   recent: { authorName: string; text: string }[];
   pending: { id: number; question: string; originalText: string; authorName: string }[];
 }
@@ -52,6 +55,7 @@ Rules:
 - Titles are short and natural, e.g. "Thanksgiving at Mom's".
 - If the message replies to or edits a message linked to an event, that event is the one being discussed. An edit that removes the plan means cancel; one that changes nothing about the event means none.
 - If the message answers a pending question, set question_id to that question's id and act on the original message plus the answer.
+- "Other calendar events" were added outside the bot and have no id. If a message announces or changes one of them, choose none rather than creating a duplicate.
 - When unsure whether a message is about the calendar at all, choose none.
 - Unused fields are null.`;
 
@@ -73,6 +77,11 @@ function describeEvent(e: StoredEvent): string {
 export function buildPrompt(input: BrainInput): string {
   const lines = [`Now: ${input.now}`, "", "Upcoming events:"];
   lines.push(...(input.upcoming.length ? input.upcoming.map((e) => `- ${describeEvent(e)}`) : ["- (none)"]));
+
+  if (input.otherEvents.length) {
+    lines.push("", "Other calendar events:");
+    for (const e of input.otherEvents) lines.push(`- "${e.title}" ${formatWhen(e.start, e.allDay)} (start ${e.start})${e.location ? ` at ${e.location}` : ""}`);
+  }
 
   if (input.pending.length) {
     lines.push("", "Pending questions the bot asked:");

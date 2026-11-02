@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { StoredEvent } from "./store";
 import { formatWhen } from "./time";
 
 // Runs only on messages Claude chose "none" for. Jev answers yes/no questions about the
@@ -8,7 +7,7 @@ import { formatWhen } from "./time";
 export interface TriageInput {
   message: { authorName: string; text: string };
   recent: { authorName: string; text: string }[];
-  upcoming: StoredEvent[];
+  upcoming: { title: string; start: string; allDay: boolean }[];
   pendingQuestions: string[];
 }
 
